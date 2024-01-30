@@ -4,6 +4,9 @@ JAX library for MARL research
 [Demo Video](https://youtu.be/WQVQXPIUZxk)
 [Paper Link](https://arxiv.org/abs/2303.13808)
 
+# Funding Source
+This work was funded at IIIT-H, Hyderabad, India
+
 ## Implemented Algorithms
 - [x] Independent-IMPALA for multi-agent environments
 - [x] [OPRE](https://www.deepmind.com/publications/options-as-responses-grounding-behavioural-hierarchies-in-multi-agent-rl)
