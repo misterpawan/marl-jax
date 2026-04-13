@@ -11,8 +11,12 @@ from collections.abc import Mapping
 from typing import Any, Optional
 
 import dm_env
-from meltingpot.python.utils.substrates import substrate
 import numpy as np
+
+try:
+  from meltingpot.python.utils.substrates import substrate
+except ModuleNotFoundError:
+  substrate = None
 
 
 def _setdefault(dictionary: Mapping[str, Any], key: str,
@@ -31,59 +35,58 @@ def _setdefault(dictionary: Mapping[str, Any], key: str,
     return dict(dictionary, **{key: value})
 
 
-class Wrapper(substrate.Substrate):
-  """Wrapper to add observations with default values if not actually present."""
+if substrate is not None:
 
-  def __init__(self,
-               env: substrate.Substrate,
-               key: str,
-               default_value: np.ndarray,
-               default_spec: Optional[dm_env.specs.Array] = None):
-    """Initializer.
-    Args:
-      env: environment to wrap. When this wrapper closes env will also be
-        closed.
-      key: field name of the observation to add.
-      default_value: The default value to add to the observation.
-      default_spec: The default spec for the observation to add. By default,
-        this will be set to match default_value. If specified this must match
-        the default value.
-    """
-    super().__init__(env)
-    self._key = key
-    self._default_value = default_value.copy()
-    self._default_value.flags.writeable = False
-    if default_spec is None:
-      self._default_spec = dm_env.specs.Array(
-          shape=self._default_value.shape,
-          dtype=self._default_value.dtype,
-          name=self._key)
-    else:
-      self._default_spec = default_spec
-    self._default_spec.validate(self._default_value)
+  class Wrapper(substrate.Substrate):
+    """Wrapper to add observations with default values if not actually present."""
 
-  def reset(self):
-    """See base class."""
-    timestep = super().reset()
-    observation = [
-        _setdefault(obs, self._key, self._default_value)
-        for obs in timestep.observation
-    ]
-    return timestep._replace(observation=observation)
+    def __init__(self,
+                 env: substrate.Substrate,
+                 key: str,
+                 default_value: np.ndarray,
+                 default_spec: Optional[dm_env.specs.Array] = None):
+      """Initializer."""
+      super().__init__(env)
+      self._key = key
+      self._default_value = default_value.copy()
+      self._default_value.flags.writeable = False
+      if default_spec is None:
+        self._default_spec = dm_env.specs.Array(
+            shape=self._default_value.shape,
+            dtype=self._default_value.dtype,
+            name=self._key)
+      else:
+        self._default_spec = default_spec
+      self._default_spec.validate(self._default_value)
 
-  def step(self, action):
-    """See base class."""
-    timestep = super().step(action)
-    observation = [
-        _setdefault(obs, self._key, self._default_value)
-        for obs in timestep.observation
-    ]
-    return timestep._replace(observation=observation)
+    def reset(self):
+      timestep = super().reset()
+      observation = [
+          _setdefault(obs, self._key, self._default_value)
+          for obs in timestep.observation
+      ]
+      return timestep._replace(observation=observation)
 
-  def observation_spec(self):
-    """See base class."""
-    observation_spec = super().observation_spec()
-    return [
-        _setdefault(obs, self._key, self._default_spec)
-        for obs in observation_spec
-    ]
+    def step(self, action):
+      timestep = super().step(action)
+      observation = [
+          _setdefault(obs, self._key, self._default_value)
+          for obs in timestep.observation
+      ]
+      return timestep._replace(observation=observation)
+
+    def observation_spec(self):
+      observation_spec = super().observation_spec()
+      return [
+          _setdefault(obs, self._key, self._default_spec)
+          for obs in observation_spec
+      ]
+
+else:
+
+  class Wrapper:
+
+    def __init__(self, *args, **kwargs):
+      raise ModuleNotFoundError(
+          "Default observation wrapper requires the 'meltingpot' package."
+      )

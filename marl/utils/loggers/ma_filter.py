@@ -1,6 +1,7 @@
 """Wrapper for logger to handle multi-agent logging."""
 
 from acme.utils.loggers import base
+import numpy as np
 
 
 class MAFilter(base.Logger):
@@ -18,8 +19,11 @@ class MAFilter(base.Logger):
   def write(self, values: base.LoggingData):
     new_values = dict()
     for key, value in values.items():
-      if type(value) in [list, tuple] or hasattr(value, "__len__"):
+      if isinstance(value, (list, tuple)):
         for idx, val in enumerate(value):
+          new_values[f"agent_{idx}/{key}"] = val
+      elif hasattr(value, "shape") and np.ndim(value) > 0:
+        for idx, val in enumerate(np.asarray(value)):
           new_values[f"agent_{idx}/{key}"] = val
       else:
         new_values[key] = value

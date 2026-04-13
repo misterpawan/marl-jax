@@ -7,25 +7,25 @@ sys.path.append(cwd)
 import datetime
 import functools
 from functools import partial
+from typing import TYPE_CHECKING
 
 from acme.wrappers import SinglePrecisionWrapper
 import cv2
 import dm_env
-import dmlab2d
-from meltingpot.python import scenario
-from meltingpot.python import substrate
 import numpy as np
 
-from marl.wrappers import all_observations_wrapper
-from marl.wrappers import AutoResetWrapper
-from marl.wrappers import default_observation_wrapper
-from marl.wrappers import HierarchyVecWrapper
-from marl.wrappers import MeltingPotWrapper
-from marl.wrappers import MergeWrapper
-from marl.wrappers import ObservationActionRewardWrapper
-from marl.wrappers import OverCooked
-from marl.wrappers import SSDWrapper
+from marl.wrappers import all_observations_wrapper as all_observations_wrapper
+from marl.wrappers import default_observation_wrapper as default_observation_wrapper
+from marl.wrappers.autoreset_wrapper import AutoResetWrapper
+from marl.wrappers.hierarchy_wrapper import HierarchyVecWrapper
+from marl.wrappers.merge_marl_wrapper import MergeWrapper
+from marl.wrappers.observation_action_wrapper import ObservationActionRewardWrapper
+from marl.wrappers.overcooked import OverCooked
+from marl.wrappers.ssd import SSDWrapper
 from marl.wrappers.ssd_envs.env_creator import get_env_creator
+
+if TYPE_CHECKING:
+  import dmlab2d
 
 
 def node_allocation(available_gpus, use_inference_server):
@@ -55,8 +55,11 @@ def make_meltingpot_environment(seed: int,
                                 reward_scale: float = 1.0,
                                 global_observation_sharing: bool = False,
                                 diversity_dim: int = None,
-                                record: bool = False) -> dmlab2d.Environment:
+                                record: bool = False) -> dm_env.Environment:
   """Returns a MeltingPot environment."""
+  from meltingpot.python import substrate
+  from marl.wrappers.meltingpot_wrapper import MeltingPotWrapper
+
   env_config = substrate.get_config(substrate_name)
   env = substrate.build(substrate_name, roles=env_config.default_player_roles)
   if record:
@@ -94,8 +97,10 @@ def make_meltingpot_scenario(seed: int,
                              reward_scale: float = 1.0,
                              global_observation_sharing: bool = False,
                              diversity_dim: int = None,
-                             record: bool = False) -> dmlab2d.Environment:
+                             record: bool = False) -> dm_env.Environment:
   """Returns a `MeltingPotWrapper` environment."""
+  from meltingpot.python import scenario
+  from marl.wrappers.meltingpot_wrapper import MeltingPotWrapper
 
   def transform_substrate(env, wrappers):
     for wrapper in wrappers:
@@ -172,6 +177,8 @@ def env_factory(seed: int,
 
 
 def eval_env_factories(env_name, reward_scale: float = 1.0):
+  from meltingpot.python import scenario
+
   eval_envs = []
   if env_name[-1].isdigit():
     eval_envs.append(lambda seed: make_meltingpot_scenario(
@@ -191,7 +198,7 @@ def make_overcooked_environment(seed: int,
                                 reward_scale: float = 1.0,
                                 global_observation_sharing: bool = False,
                                 diversity_dim: int = None,
-                                record: bool = False) -> dmlab2d.Environment:
+                                record: bool = False) -> dm_env.Environment:
   """Returns an Overcooked environment."""
   env = OverCooked(
       map_name, reward_scale=reward_scale, max_env_steps=400, record=record)
@@ -220,7 +227,7 @@ def make_ssd_environment(seed: int,
                          num_agents: int = 2,
                          global_observation_sharing: bool = False,
                          diversity_dim: int = None,
-                         record: bool = False) -> dmlab2d.Environment:
+                         record: bool = False) -> dm_env.Environment:
   """Returns an Overcooked environment."""
   env = get_env_creator(
       map_name, num_agents=num_agents, use_collective_reward=team_reward)(
