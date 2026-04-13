@@ -23,6 +23,7 @@ class MAConfig:
 
   # Environment Details
   n_agents: int = None
+  actor_device: str = "cpu"
 
   # Optimization configuration
   use_parameter_sampling: bool = False
@@ -69,6 +70,8 @@ class MAConfig:
     #       break
     if self.use_parameter_sampling and self.parameter_shuffle_period < 1:
       self.parameter_shuffle_period = 1
+    if self.actor_device not in ("cpu", "gpu"):
+      raise ValueError("actor_device must be either 'cpu' or 'gpu'.")
     if self.learner_prefetch_size < 1:
       raise ValueError("learner_prefetch_size must be a positive integer.")
     if isinstance(self.max_queue_size, types.Batches):

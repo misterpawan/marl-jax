@@ -74,6 +74,12 @@ flags.DEFINE_integer(
     2,
     "Number of learner batches to prefetch ahead of training.",
 )
+flags.DEFINE_enum(
+    "actor_device",
+    "auto",
+    ["auto", "cpu", "gpu"],
+    "Device for local actor and evaluator inference. 'auto' uses GPU for local runs when available.",
+)
 flags.DEFINE_integer("seed", 0, "Random seed.")
 flags.DEFINE_integer("num_steps", 200_000_000, "Number of env steps to run.")
 flags.DEFINE_string("exp_log_dir", "./results/",
@@ -104,6 +110,16 @@ def _use_memory_efficient_learner(num_agents: int) -> bool:
     return True
 
   return num_agents > max(8, 2 * max(1, jax.local_device_count()))
+
+
+def _resolve_actor_device() -> str:
+  if FLAGS.actor_device != "auto":
+    return FLAGS.actor_device
+
+  if FLAGS.async_distributed or FLAGS.inference_server:
+    return "cpu"
+
+  return "gpu" if jax.default_backend() == "gpu" else "cpu"
 
 
 def build_experiment_config():
@@ -178,6 +194,7 @@ def build_experiment_config():
 
   environment_specs = ma_specs.MAEnvironmentSpec(env_factory(0))
   memory_efficient = _use_memory_efficient_learner(environment_specs.num_agents)
+  actor_device = _resolve_actor_device()
 
   if FLAGS.algo_name == "IMPALA":
     # Create network
@@ -189,6 +206,7 @@ def build_experiment_config():
     config = impala.IMPALAConfig(
         n_agents=environment_specs.num_agents,
         memory_efficient=memory_efficient,
+        actor_device=actor_device,
         parameter_shuffle_period=FLAGS.parameter_shuffle_period,
         learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
@@ -203,6 +221,7 @@ def build_experiment_config():
     config = impala.IMPALAConfig(
         n_agents=environment_specs.num_agents,
         memory_efficient=memory_efficient,
+        actor_device=actor_device,
         parameter_shuffle_period=FLAGS.parameter_shuffle_period,
         learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
@@ -221,6 +240,7 @@ def build_experiment_config():
         n_agents=environment_specs.num_agents,
         num_options=num_options,
         memory_efficient=memory_efficient,
+        actor_device=actor_device,
         parameter_shuffle_period=FLAGS.parameter_shuffle_period,
         learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
@@ -238,6 +258,7 @@ def build_experiment_config():
         n_agents=environment_specs.num_agents,
         num_options=num_options,
         memory_efficient=memory_efficient,
+        actor_device=actor_device,
         parameter_shuffle_period=FLAGS.parameter_shuffle_period,
         learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))

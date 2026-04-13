@@ -5,6 +5,8 @@ with some modifications to work with MARL setup.
 """
 """Runner used for executing local MARL agent."""
 
+from collections.abc import Sequence
+
 import acme
 from acme import core
 from acme.jax import variable_utils
@@ -18,6 +20,10 @@ import jax.numpy as jnp
 from marl import specs as ma_specs
 from marl.experiments import config as ma_config
 from marl.utils import experiment_utils as ma_utils
+
+
+def _default_actor_device() -> str:
+  return "gpu" if jax.default_backend() == "gpu" else "cpu"
 
 
 def run_evaluation(
@@ -83,7 +89,10 @@ def run_evaluation(
   print(f'Learner parameters successfully updated!')
 
   variable_client = variable_utils.VariableClient(
-      client=learner, key="network", update_period=int(1), device="cpu")
+      client=learner,
+      key="network",
+      update_period=int(1),
+      device=_default_actor_device())
 
   # Create the evaluation actor and loop.
   eval_counter = counting.Counter(
@@ -128,6 +137,7 @@ class Evaluate(core.Actor):
     self.n_params = n_params
     self._rng = rng
     self._variable_client = variable_client
+    self._states = None
 
     def initialize_states(rng_sequence: hk.PRNGSequence,) -> list[hk.LSTMState]:
       """Initialize the recurrent states of the actor."""
@@ -137,7 +147,12 @@ class Evaluate(core.Actor):
       return states
 
     self._initial_states = ma_utils.merge_data(initialize_states(self._rng))
-    self._p_forward = jax.vmap(self.forward_fn)
+    self._p_forward = jax.jit(jax.vmap(self.forward_fn))
+
+  def _prepare_observations(self, observations):
+    if isinstance(observations, Sequence):
+      observations = ma_utils.merge_data(observations)
+    return jax.tree_util.tree_map(jnp.asarray, observations)
 
   def select_action(self, observations):
     if self._states is None:
@@ -149,15 +164,16 @@ class Evaluate(core.Actor):
       self.episode_params = ma_utils.select_idx(self.loaded_params,
                                                 self.selected_params)
 
+    observations = self._prepare_observations(observations)
     (logits, _), new_states = self._p_forward(self.episode_params, observations,
                                               self._states)
     # probability based action selection
     # actions = jax.random.categorical(next(self._rng), logits)
     # greedy action selection
-    actions = jnp.argmax(logits, axis=-1)
+    actions = jnp.argmax(logits, axis=-1).astype(jnp.int32)
 
     self._states = new_states
-    return jax.tree_util.tree_map(lambda a: [*a], actions)
+    return jax.device_get(actions)
 
   def observe_first(self, timestep: dm_env.TimeStep):
     self._states = None

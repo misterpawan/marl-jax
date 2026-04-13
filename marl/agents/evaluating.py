@@ -1,10 +1,13 @@
 """Multi-agent evaluator implementation."""
 
+from collections.abc import Sequence
+
 from acme import core
 from acme.jax import variable_utils
 import dm_env
 import haiku as hk
 import jax
+import jax.numpy as jnp
 
 from marl.utils import experiment_utils as ma_utils
 
@@ -29,6 +32,7 @@ class MAEvaluator(core.Actor):
     self.n_params = n_params
     self._rng = rng
     self._variable_client = variable_client
+    self._states = None
 
     def initialize_states(rng_sequence: hk.PRNGSequence,) -> list[hk.LSTMState]:
       """Initialize the recurrent states of the actor."""
@@ -38,7 +42,12 @@ class MAEvaluator(core.Actor):
       return states
 
     self._initial_states = ma_utils.merge_data(initialize_states(self._rng))
-    self._p_forward = jax.vmap(self.forward_fn)
+    self._p_forward = jax.jit(jax.vmap(self.forward_fn))
+
+  def _prepare_observations(self, observations):
+    if isinstance(observations, Sequence):
+      observations = ma_utils.merge_data(observations)
+    return jax.tree_util.tree_map(jnp.asarray, observations)
 
   def select_action(self, observations):
     if self._states is None:
@@ -50,13 +59,13 @@ class MAEvaluator(core.Actor):
       self.episode_params = ma_utils.select_idx(self.loaded_params,
                                                 self.selected_params)
 
-    observations = ma_utils.merge_data(observations)
+    observations = self._prepare_observations(observations)
     (logits, _), new_states = self._p_forward(self.episode_params, observations,
                                               self._states)
     actions = jax.random.categorical(next(self._rng), logits)
 
     self._states = new_states
-    return jax.tree_util.tree_map(lambda a: [*a], actions)
+    return jax.device_get(actions.astype(jnp.int32))
 
   def observe_first(self, timestep: dm_env.TimeStep):
     self._states = None

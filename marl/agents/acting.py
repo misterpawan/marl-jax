@@ -1,5 +1,6 @@
 """Multi-agent actor implementation."""
 
+from collections.abc import Sequence
 from typing import Optional
 
 from acme import adders
@@ -37,6 +38,7 @@ class MAActor(core.Actor):
 
     self._rng = rng
     self.n_agents = n_agents
+    self._states = None
 
     def initialize_states(rng_sequence: hk.PRNGSequence,) -> list[hk.LSTMState]:
       """Initialize the recurrent states of the actor."""
@@ -47,21 +49,31 @@ class MAActor(core.Actor):
 
     self._initial_states = ma_utils.merge_data(initialize_states(self._rng))
 
+    def policy_step(params, observations, states, rng):
+      (logits, _), new_states = self._forward(params, observations, states)
+      actions = jax.random.categorical(rng, logits)
+      return actions, logits, new_states
+
+    self._policy_step = jax.jit(policy_step)
+
+  def _prepare_observations(self, observations: types.Observations):
+    if isinstance(observations, Sequence):
+      observations = ma_utils.merge_data(observations)
+    return jax.tree_util.tree_map(jnp.asarray, observations)
+
   def select_action(self, observations: types.Observations) -> types.Actions:
     if self._states is None:
       self._states = self._initial_states
 
-    observations = jax.tree_util.tree_map(lambda x: jnp.array(x), observations)
-    (logits, _), new_states = self._forward(self._params, observations,
-                                            self._states)
-
-    actions = jax.random.categorical(next(self._rng), logits)
+    observations = self._prepare_observations(observations)
+    actions, logits, new_states = self._policy_step(
+        self._params, observations, self._states, next(self._rng))
 
     self._prev_logits = logits
     self._prev_states = self._states
     self._states = new_states
 
-    return jax.tree_util.tree_map(lambda a: [*a], actions)
+    return jax.device_get(actions.astype(jnp.int32))
 
   def observe_first(self, timestep: dm_env.TimeStep):
     if self._adder:
@@ -84,7 +96,7 @@ class MAActor(core.Actor):
             "cell": self._prev_states.cell
         },
     }
-    self._adder.add(ma_utils.merge_data(action), next_timestep, extras)
+    self._adder.add(jnp.asarray(action, dtype=jnp.int32), next_timestep, extras)
 
   def update(self, wait: bool = False):
     if self._variable_client is not None:

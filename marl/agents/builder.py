@@ -159,7 +159,7 @@ class MABuilder(builders.ActorLearnerBuilder[types.RecurrentNetworks,
         client=variable_source,
         key="network",
         update_period=self._config.variable_update_period,
-        device="cpu",
+        device=self._config.actor_device,
     )
 
     return MAActor(
@@ -183,7 +183,7 @@ class MABuilder(builders.ActorLearnerBuilder[types.RecurrentNetworks,
         client=variable_source,
         key="network",
         update_period=1,  # using 1 as update is called only at the start of episode
-        device="cpu",
+        device=self._config.actor_device,
     )
 
     return MAEvaluator(

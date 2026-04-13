@@ -27,7 +27,7 @@ SWITCH_VIEW_SIZE = 3
 class SwitchEnv(MapEnv):
 
   def __init__(self, num_switches=6, num_agents=1, return_agent_actions=False):
-    constructed_map = self.construct_map(num_switches)
+    constructed_map = self.construct_map(num_switches, num_agents)
     super().__init__(constructed_map, _SWITCH_ACTIONS, SWITCH_VIEW_SIZE,
                      num_agents)
     self.return_agent_actions = return_agent_actions
@@ -61,7 +61,7 @@ class SwitchEnv(MapEnv):
     self.color_map.update(SWITCH_COLORS)
 
   @staticmethod
-  def construct_map(num_switches):
+  def construct_map(num_switches, num_agents=1):
     # Minimum of 1 row so that the agent can be placed
     num_rows = max(1, int(math.ceil(num_switches / 2)))
     partial_map = [SwitchMapElements.top_row]
@@ -75,9 +75,23 @@ class SwitchEnv(MapEnv):
         partial_map.append(SwitchMapElements.two_switch_row)
         num_switches -= 2
     partial_map.append(SwitchMapElements.bottom_row)
-    middle_row = int(math.ceil(num_rows / 2))
-    partial_map[middle_row] = partial_map[middle_row][:3] + "P" + partial_map[
-        middle_row][4:]
+    interior_rows = list(range(1, len(partial_map) - 1))
+    middle_row = len(interior_rows) // 2
+    preferred_rows = sorted(
+        interior_rows, key=lambda row: abs((row - 1) - middle_row))
+    spawn_columns = [3, 2, 4, 1, 5]
+    remaining_agents = num_agents
+    for col in spawn_columns:
+      for row in preferred_rows:
+        if remaining_agents < 1:
+          break
+        if partial_map[row][col] != " ":
+          continue
+        partial_map[row] = (
+            partial_map[row][:col] + "P" + partial_map[row][col + 1:])
+        remaining_agents -= 1
+      if remaining_agents < 1:
+        break
     return partial_map
 
   def step(self, actions):

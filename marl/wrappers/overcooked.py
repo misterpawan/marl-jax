@@ -25,7 +25,11 @@ class OverCooked(dm_env.Environment):
                record=False) -> None:
 
     base_mdp = OvercookedGridworld.from_layout_name(scenario_name)
-    self.env = OvercookedEnv.from_mdp(base_mdp, horizon=max_env_steps)
+    try:
+      self.env = OvercookedEnv.from_mdp(
+          base_mdp, horizon=max_env_steps, info_level=0)
+    except TypeError:
+      self.env = OvercookedEnv.from_mdp(base_mdp, horizon=max_env_steps)
     self.reward_scale = reward_scale
     self.num_agents = self.env.mdp.num_players
     self.num_actions = len(Action.ALL_ACTIONS)

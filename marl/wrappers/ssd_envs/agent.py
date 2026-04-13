@@ -269,6 +269,10 @@ class SwitchAgent(Agent):
   def get_done(self):
     return self.is_done
 
+  def hit(self, char):
+    if char == b"F":
+      self.reward_this_turn += 0
+
   def consume(self, char):
     """Defines how an agent interacts with the char it is standing on"""
     if char == b"d":
