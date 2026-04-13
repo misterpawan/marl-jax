@@ -36,6 +36,7 @@ class IMPALALearner(learning.MALearner):
       baseline_cost: float = 1.0,
       entropy_cost: float = 0.0,
       max_abs_reward: float = np.inf,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -48,7 +49,8 @@ class IMPALALearner(learning.MALearner):
         max_abs_reward=max_abs_reward,
     )
     super().__init__(network, iterator, optimizer, n_agents, random_key,
-                     loss_fn, counter, logger, devices)
+                     loss_fn, parameter_shuffle_period, counter, logger,
+                     devices)
 
 
 class PopArtIMPALALearner(learning.MALearnerPopArt):
@@ -65,6 +67,7 @@ class PopArtIMPALALearner(learning.MALearnerPopArt):
       baseline_cost: float = 1.0,
       entropy_cost: float = 0.0,
       max_abs_reward: float = np.inf,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -84,7 +87,8 @@ class PopArtIMPALALearner(learning.MALearnerPopArt):
             max_abs_reward=max_abs_reward,
         ))
     super().__init__(network, popart[0], iterator, optimizer, n_agents,
-                     random_key, loss_fn, counter, logger, devices)
+                     random_key, loss_fn, parameter_shuffle_period, counter,
+                     logger, devices)
 
 
 class IMPALALearnerME(learning_memory_efficient.MALearner):
@@ -100,6 +104,7 @@ class IMPALALearnerME(learning_memory_efficient.MALearner):
       baseline_cost: float = 1.0,
       entropy_cost: float = 0.0,
       max_abs_reward: float = np.inf,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -112,7 +117,8 @@ class IMPALALearnerME(learning_memory_efficient.MALearner):
         max_abs_reward=max_abs_reward,
     )
     super().__init__(network, iterator, optimizer, n_agents, random_key,
-                     loss_fn, counter, logger, devices)
+                     loss_fn, parameter_shuffle_period, counter, logger,
+                     devices)
 
 
 class PopArtIMPALALearnerME(learning_memory_efficient.MALearnerPopArt):
@@ -129,6 +135,7 @@ class PopArtIMPALALearnerME(learning_memory_efficient.MALearnerPopArt):
       baseline_cost: float = 1.0,
       entropy_cost: float = 0.0,
       max_abs_reward: float = np.inf,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -148,4 +155,5 @@ class PopArtIMPALALearnerME(learning_memory_efficient.MALearnerPopArt):
             max_abs_reward=max_abs_reward,
         ))
     super().__init__(network, popart[0], iterator, optimizer, n_agents,
-                     random_key, loss_fn, counter, logger, devices)
+                     random_key, loss_fn, parameter_shuffle_period, counter,
+                     logger, devices)

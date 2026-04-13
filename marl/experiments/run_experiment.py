@@ -80,7 +80,8 @@ def run_experiment(
   dataset = experiment.builder.make_dataset_iterator(replay_client)
   # We always use prefetch, as it provides an iterator with additional
   # 'ready' method.
-  dataset = utils.prefetch(dataset, buffer_size=1)
+  dataset = utils.prefetch(
+      dataset, buffer_size=experiment.builder._config.learner_prefetch_size)
   learner_key, key = jax.random.split(key)
   learner = experiment.builder.make_learner(
       random_key=learner_key,

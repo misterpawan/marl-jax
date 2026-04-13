@@ -119,10 +119,13 @@ class MABuilder(builders.ActorLearnerBuilder[types.RecurrentNetworks,
         num_parallel_calls=None,
         max_in_flight_samples_per_worker=2 * batch_size_per_learner,
     )
-    # return utils.device_put(dataset.as_numpy_iterator(), jax.local_devices()[0])
-    return dataset.as_numpy_iterator(
-    ) if self._config.memory_efficient else utils.multi_device_put(
-        dataset.as_numpy_iterator(), jax.local_devices())
+    iterator = dataset.as_numpy_iterator()
+    local_devices = jax.local_devices()
+    if self._config.memory_efficient:
+      if len(local_devices) == 1:
+        return utils.device_put(iterator, local_devices[0])
+      return iterator
+    return utils.multi_device_put(iterator, local_devices)
 
   def make_adder(
       self,

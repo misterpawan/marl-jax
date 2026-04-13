@@ -72,6 +72,7 @@ class OPREBuilder(MABuilder):
         options_kl_cost=self._config.options_kl_cost,
         pg_mix=self._config.pg_mix,
         max_abs_reward=self._config.max_abs_reward,
+        parameter_shuffle_period=self._config.parameter_shuffle_period,
         counter=counter,
         logger=logger_fn(label="learner"),
     )
@@ -148,6 +149,7 @@ class PopArtOPREBuilder(MABuilder):
         options_kl_cost=self._config.options_kl_cost,
         pg_mix=self._config.pg_mix,
         max_abs_reward=self._config.max_abs_reward,
+        parameter_shuffle_period=self._config.parameter_shuffle_period,
         counter=counter,
         logger=logger_fn(label="learner"),
     )

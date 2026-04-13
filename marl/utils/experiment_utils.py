@@ -90,8 +90,14 @@ def slice_data(data, i: int, n_devices: int):
 
 
 @jax.jit
-def select_idx(data, i: Union[int, list]):
+def select_idx(data, i: Union[int, list], axis: int = 0):
   """
-    Select the i-th element of the array.
+    Select indices along a specific axis.
     """
-  return jax.tree_util.tree_map(lambda s: s[i], data)
+  return jax.tree_util.tree_map(lambda s: jnp.take(s, i, axis=axis), data)
+
+
+@jax.jit
+def tree_mean(data, axis=0):
+  """Compute the mean of each leaf over the given axis."""
+  return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=axis), data)

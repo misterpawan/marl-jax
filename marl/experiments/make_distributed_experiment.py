@@ -133,7 +133,8 @@ def make_distributed_experiment(
     # make_dataset_iterator is responsible for putting data onto appropriate
     # training devices, so here we apply prefetch, so that data is copied over
     # in the background.
-    iterator = utils.prefetch(iterable=iterator, buffer_size=1)
+    iterator = utils.prefetch(
+        iterable=iterator, buffer_size=experiment.builder._config.learner_prefetch_size)
     counter = counting.Counter(counter, "learner")
     learner = experiment.builder.make_learner(
         random_key,

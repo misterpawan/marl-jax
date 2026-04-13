@@ -41,9 +41,15 @@ flags.DEFINE_bool(
     "Flag to run all agents in parallel using vmap. Only use if GPU with large memory is available."
 )
 flags.DEFINE_enum(
+    "learner_mode",
+    "auto",
+    ["auto", "all_parallel", "memory_efficient"],
+    "Learner execution mode. 'auto' prefers the faster fully parallel path on GPU when the agent count is modest.",
+)
+flags.DEFINE_enum(
     "env_name",
     "overcooked",
-    ["meltingpot", "overcooked"],
+    ["meltingpot", "overcooked", "ssd"],
     "Environment to train on",
 )
 flags.DEFINE_string(
@@ -58,6 +64,16 @@ flags.DEFINE_bool("record_video", False,
 flags.DEFINE_integer("reward_scale", 1, "Reward scale factor.")
 flags.DEFINE_bool("prosocial", False,
                   "Whether to use shared reward for prosocial training.")
+flags.DEFINE_integer(
+    "parameter_shuffle_period",
+    0,
+    "Shuffle agent parameters every N learner steps. Set to 0 to disable.",
+)
+flags.DEFINE_integer(
+    "learner_prefetch_size",
+    2,
+    "Number of learner batches to prefetch ahead of training.",
+)
 flags.DEFINE_integer("seed", 0, "Random seed.")
 flags.DEFINE_integer("num_steps", 200_000_000, "Number of env steps to run.")
 flags.DEFINE_string("exp_log_dir", "./results/",
@@ -78,6 +94,18 @@ flags.DEFINE_string("experiment_dir", None,
                     "Directory to resume experiment from.")
 
 
+def _use_memory_efficient_learner(num_agents: int) -> bool:
+  if FLAGS.all_parallel or FLAGS.learner_mode == "all_parallel":
+    return False
+  if FLAGS.learner_mode == "memory_efficient":
+    return True
+
+  if jax.default_backend() != "gpu":
+    return True
+
+  return num_agents > max(8, 2 * max(1, jax.local_device_count()))
+
+
 def build_experiment_config():
   """Builds experiment config which can be executed in different ways."""
   # Create an environment, grab the spec, and use it to create networks.
@@ -88,7 +116,6 @@ def build_experiment_config():
   autoreset = False
   prosocial = FLAGS.prosocial
   record = FLAGS.record_video
-  memory_efficient = not FLAGS.all_parallel
 
   if FLAGS.experiment_dir:
     assert FLAGS.algo_name in FLAGS.experiment_dir, f"experiment_dir must be a {FLAGS.algo_name} experiment"
@@ -150,6 +177,7 @@ def build_experiment_config():
     raise ValueError(f"Unknown env_name {FLAGS.env_name}")
 
   environment_specs = ma_specs.MAEnvironmentSpec(env_factory(0))
+  memory_efficient = _use_memory_efficient_learner(environment_specs.num_agents)
 
   if FLAGS.algo_name == "IMPALA":
     # Create network
@@ -160,7 +188,9 @@ def build_experiment_config():
     # Construct the agent.
     config = impala.IMPALAConfig(
         n_agents=environment_specs.num_agents,
-        memory_efficient=memory_efficient)
+        memory_efficient=memory_efficient,
+        parameter_shuffle_period=FLAGS.parameter_shuffle_period,
+        learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
     builder = impala.IMPALABuilder(config, core_state_spec=core_spec)
   elif FLAGS.algo_name == "PopArtIMPALA":
@@ -172,7 +202,9 @@ def build_experiment_config():
     # Construct the agent.
     config = impala.IMPALAConfig(
         n_agents=environment_specs.num_agents,
-        memory_efficient=memory_efficient)
+        memory_efficient=memory_efficient,
+        parameter_shuffle_period=FLAGS.parameter_shuffle_period,
+        learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
     builder = impala.PopArtIMPALABuilder(config, core_state_spec=core_spec)
 
@@ -188,7 +220,9 @@ def build_experiment_config():
     config = opre.OPREConfig(
         n_agents=environment_specs.num_agents,
         num_options=num_options,
-        memory_efficient=memory_efficient)
+        memory_efficient=memory_efficient,
+        parameter_shuffle_period=FLAGS.parameter_shuffle_period,
+        learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
     builder = opre.OPREBuilder(config, core_state_spec=core_spec)
   elif FLAGS.algo_name == "PopArtOPRE":
@@ -203,7 +237,9 @@ def build_experiment_config():
     config = opre.OPREConfig(
         n_agents=environment_specs.num_agents,
         num_options=num_options,
-        memory_efficient=memory_efficient)
+        memory_efficient=memory_efficient,
+        parameter_shuffle_period=FLAGS.parameter_shuffle_period,
+        learner_prefetch_size=FLAGS.learner_prefetch_size)
     core_spec = network.initial_state_fn(jax.random.PRNGKey(0))
     builder = opre.PopArtOPREBuilder(config, core_state_spec=core_spec)
   else:
@@ -245,7 +281,7 @@ def main(_):
           experiment=config,
           num_actors=FLAGS.num_actors * FLAGS.actors_per_node,
           inference_server_config=inference_server.InferenceServerConfig(
-              batch_size=min(8, FLAGS.num_actors // 2),
+              batch_size=max(1, min(8, FLAGS.num_actors // 2)),
               update_period=1,
               timeout=datetime.timedelta(
                   seconds=1, milliseconds=0, microseconds=0),

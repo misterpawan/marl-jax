@@ -26,6 +26,7 @@ class MAConfig:
 
   # Optimization configuration
   use_parameter_sampling: bool = False
+  parameter_shuffle_period: int = 0
 
   # Optimizer configuration
   batch_size: int = 32
@@ -52,6 +53,7 @@ class MAConfig:
   # Replay options
   replay_table_name: str = adders_reverb.DEFAULT_PRIORITY_TABLE
   num_prefetch_threads: Optional[int] = None
+  learner_prefetch_size: int = 2
   samples_per_insert: Optional[float] = 1.0
   max_queue_size: Union[int, types.Batches] = types.Batches(10)
 
@@ -65,6 +67,10 @@ class MAConfig:
     #       self.sequence_length //= 2
     #     else:
     #       break
+    if self.use_parameter_sampling and self.parameter_shuffle_period < 1:
+      self.parameter_shuffle_period = 1
+    if self.learner_prefetch_size < 1:
+      raise ValueError("learner_prefetch_size must be a positive integer.")
     if isinstance(self.max_queue_size, types.Batches):
       self.max_queue_size *= self.batch_size
     assert (self.max_queue_size > self.batch_size + 1), """

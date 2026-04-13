@@ -32,6 +32,7 @@ class MALearner(acme.Learner):
       n_agents: int,
       random_key: networks_lib.PRNGKey,
       loss_fn: Callable,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -55,6 +56,8 @@ class MALearner(acme.Learner):
     self.n_agents = n_agents
     self.n_devices = len(self._local_devices)
     self._rng = hk.PRNGSequence(random_key)
+    self._parameter_shuffle_period = max(0, parameter_shuffle_period)
+    self._single_device = self.n_devices == 1
 
     def make_initial_state(key: jnp.ndarray) -> types.TrainingState:
       """Initialises the training state (parameters and optimiser state)."""
@@ -115,8 +118,14 @@ class MALearner(acme.Learner):
 
     self._loss_fn = loss_fn(network=network)
 
-    self._sgd_step = jax.pmap(
-        sgd_step, axis_name=_PMAP_AXIS_NAME, in_axes=(0, 2))
+    if self._single_device:
+      self._sgd_step = jax.jit(jax.vmap(sgd_step, in_axes=(0, 2)))
+    else:
+      self._sgd_step = jax.pmap(
+          sgd_step,
+          axis_name=_PMAP_AXIS_NAME,
+          in_axes=(0, 2),
+          devices=self._local_devices)
 
     # Set up logging/counting.
     self._counter = counter or counting.Counter()
@@ -124,9 +133,13 @@ class MALearner(acme.Learner):
         "learner", steps_key=self._counter.get_steps_key())
 
     # Initialize prediction function and initial LSTM states
-    self._predict_fn = jax.pmap(
-        jax.vmap(network.forward_fn, in_axes=(0, 1, 1), out_axes=(1, 1)),
-        devices=self._local_devices)
+    if self._single_device:
+      self._predict_fn = jax.jit(
+          jax.vmap(network.forward_fn, in_axes=(0, 1, 1), out_axes=(1, 1)))
+    else:
+      self._predict_fn = jax.pmap(
+          jax.vmap(network.forward_fn, in_axes=(0, 1, 1), out_axes=(1, 1)),
+          devices=self._local_devices)
 
   def _get_initial_lstm_states(self):
 
@@ -167,42 +180,60 @@ class MALearner(acme.Learner):
     # Do a batch of SGD.
     start = time.time()
 
-    new_states = []
-    results = []
-    for i in range(0, self.n_agents, self.n_devices):
-      cur_state = ma_utils.slice_data(self._combined_states, i, self.n_devices)
-      cur_sample = types.TrainingData(
-          observation=slice_data_2(samples.observation, i, self.n_devices),
-          action=slice_data_2(samples.action, i, self.n_devices),
-          reward=slice_data_2(samples.reward, i, self.n_devices),
-          discount=slice_data_2(samples.discount, i, self.n_devices),
-          extras=slice_data_2(samples.extras, i, self.n_devices),
-      )
+    if self._single_device:
+      self._combined_states, results = self._sgd_step(self._combined_states,
+                                                      samples)
+      results = ma_utils.tree_mean(results)
+    else:
+      new_states = []
+      results = []
+      for i in range(0, self.n_agents, self.n_devices):
+        chunk_size = min(self.n_devices, self.n_agents - i)
+        cur_state = ma_utils.slice_data(self._combined_states, i, self.n_devices)
+        cur_sample = types.TrainingData(
+            observation=slice_data_2(samples.observation, i, self.n_devices),
+            action=slice_data_2(samples.action, i, self.n_devices),
+            reward=slice_data_2(samples.reward, i, self.n_devices),
+            discount=slice_data_2(samples.discount, i, self.n_devices),
+            extras=slice_data_2(samples.extras, i, self.n_devices),
+        )
+        if chunk_size < self.n_devices:
+          pad_size = self.n_devices - chunk_size
+          cur_state = pad_data_0(cur_state, pad_size)
+          cur_sample = types.TrainingData(
+              observation=pad_data_2(cur_sample.observation, pad_size),
+              action=pad_data_2(cur_sample.action, pad_size),
+              reward=pad_data_2(cur_sample.reward, pad_size),
+              discount=pad_data_2(cur_sample.discount, pad_size),
+              extras=pad_data_2(cur_sample.extras, pad_size),
+          )
 
-      new_state, result = self._sgd_step(cur_state, cur_sample)
+        new_state, result = self._sgd_step(cur_state, cur_sample)
+        if chunk_size < self.n_devices:
+          new_state = ma_utils.slice_data(new_state, 0, chunk_size)
+          result = ma_utils.slice_data(result, 0, chunk_size)
 
-      new_states.append(jax.device_get(new_state))
-      results.append(jax.device_get(result))
+        new_states.append(new_state)
+        results.append(result)
 
-    self._combined_states = ma_utils.concat_data(new_states)
-    results = ma_utils.concat_data(results, axis=None)
+      self._combined_states = ma_utils.concat_data(new_states)
+      results = ma_utils.tree_mean(ma_utils.concat_data(results))
 
     # Update our counts and record them.
     counts = self._counter.increment(steps=1, time_elapsed=time.time() - start)
 
-    # Shuffle the parameters every 1 learner steps
-    if counts["learner_steps"] % 1 == 0:
-      selected_order = jax.random.choice(
-          next(self._rng), self.n_agents, (self.n_agents,), replace=False)
-      # converting the selected_order to numpy as the parameters are also in numpy
-      selected_order = jax.device_get(selected_order)
-
-      shuffle_state = self.save()
-      shuffle_state = ma_utils.select_idx(shuffle_state, selected_order)
-      self.restore(shuffle_state)
+    self._maybe_shuffle_parameters(counts["learner_steps"])
 
     # Maybe write logs.
     self._logger.write({**results, **counts})
+
+  def _maybe_shuffle_parameters(self, learner_steps: int):
+    if (self._parameter_shuffle_period < 1 or
+        learner_steps % self._parameter_shuffle_period != 0):
+      return
+    selected_order = jax.random.permutation(next(self._rng), self.n_agents)
+    self._combined_states = ma_utils.select_idx(self._combined_states,
+                                                selected_order)
 
   def get_variables(self, names: Sequence[str]) -> list[networks_lib.Params]:
     # Return first replica of parameters.
@@ -227,6 +258,7 @@ class MALearnerPopArt(MALearner):
       n_agents: int,
       random_key: networks_lib.PRNGKey,
       loss_fn: Callable,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -251,6 +283,8 @@ class MALearnerPopArt(MALearner):
     self.n_agents = n_agents
     self.n_devices = len(self._local_devices)
     self._rng = hk.PRNGSequence(random_key)
+    self._parameter_shuffle_period = max(0, parameter_shuffle_period)
+    self._single_device = self.n_devices == 1
 
     def make_initial_state(key: jnp.ndarray) -> types.PopArtTrainingState:
       """Initialises the training state (parameters and optimiser state)."""
@@ -316,8 +350,14 @@ class MALearnerPopArt(MALearner):
 
     self._loss_fn = loss_fn(network=network, popart_update_fn=popart.update_fn)
 
-    self._sgd_step = jax.pmap(
-        sgd_step, axis_name=_PMAP_AXIS_NAME, in_axes=(0, 2))
+    if self._single_device:
+      self._sgd_step = jax.jit(jax.vmap(sgd_step, in_axes=(0, 2)))
+    else:
+      self._sgd_step = jax.pmap(
+          sgd_step,
+          axis_name=_PMAP_AXIS_NAME,
+          in_axes=(0, 2),
+          devices=self._local_devices)
 
     # Set up logging/counting.
     self._counter = counter or counting.Counter()
@@ -325,9 +365,13 @@ class MALearnerPopArt(MALearner):
         "learner", steps_key=self._counter.get_steps_key())
 
     # Initialize prediction function and initial LSTM states
-    self._predict_fn = jax.pmap(
-        jax.vmap(network.forward_fn, in_axes=(0, 1, 1), out_axes=(1, 1)),
-        devices=self._local_devices)
+    if self._single_device:
+      self._predict_fn = jax.jit(
+          jax.vmap(network.forward_fn, in_axes=(0, 1, 1), out_axes=(1, 1)))
+    else:
+      self._predict_fn = jax.pmap(
+          jax.vmap(network.forward_fn, in_axes=(0, 1, 1), out_axes=(1, 1)),
+          devices=self._local_devices)
 
 
 def slice_data_2(data, i: int, n_devices: int):
@@ -335,3 +379,23 @@ def slice_data_2(data, i: int, n_devices: int):
     Slice the merged data on the (agent's index) index 2 based on the available devices.
     """
   return jax.tree_util.tree_map(lambda x: x[:, :, i:i + n_devices], data)
+
+
+def pad_data_0(data, pad_size: int):
+  """Pad the leading axis of a pytree by `pad_size`."""
+  if pad_size == 0:
+    return data
+  return jax.tree_util.tree_map(lambda x: _pad_axis(x, 0, pad_size), data)
+
+
+def pad_data_2(data, pad_size: int):
+  """Pad the agent axis of a training batch by `pad_size`."""
+  if pad_size == 0:
+    return data
+  return jax.tree_util.tree_map(lambda x: _pad_axis(x, 2, pad_size), data)
+
+
+def _pad_axis(x, axis: int, pad_size: int):
+  pad_width = [(0, 0)] * x.ndim
+  pad_width[axis] = (0, pad_size)
+  return jnp.pad(x, pad_width)

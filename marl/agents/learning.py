@@ -33,6 +33,7 @@ class MALearner(acme.Learner):
       n_agents: int,
       random_key: networks_lib.PRNGKey,
       loss_fn: Callable,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -56,6 +57,7 @@ class MALearner(acme.Learner):
     self.n_agents = n_agents
     self.n_devices = len(self._local_devices)
     self._rng = hk.PRNGSequence(random_key)
+    self._parameter_shuffle_period = max(0, parameter_shuffle_period)
 
     def make_initial_state(key: jnp.ndarray) -> types.TrainingState:
       """Initialises the training state (parameters and optimiser state)."""
@@ -179,24 +181,24 @@ class MALearner(acme.Learner):
                                                     samples)
 
     results = acme_utils.get_from_first_device(results)
+    results = ma_utils.tree_mean(results)
     # results = jax.tree_util.tree_map(lambda a: [*a], results)
 
     # Update our counts and record them.
     counts = self._counter.increment(steps=1, time_elapsed=time.time() - start)
 
-    # Shuffle the parameters every 1 learner steps
-    if counts["learner_steps"] % 1 == 0:
-      selected_order = jax.random.choice(
-          next(self._rng), self.n_agents, (self.n_agents,), replace=False)
-      # converting the selected_order to numpy as the parameters are also in numpy
-      selected_order = jax.device_get(selected_order)
-
-      shuffle_state = self.save()
-      shuffle_state = ma_utils.select_idx(shuffle_state, selected_order)
-      self.restore(shuffle_state)
+    self._maybe_shuffle_parameters(counts["learner_steps"])
 
     # Maybe write logs.
     self._logger.write({**results, **counts})
+
+  def _maybe_shuffle_parameters(self, learner_steps: int):
+    if (self._parameter_shuffle_period < 1 or
+        learner_steps % self._parameter_shuffle_period != 0):
+      return
+    selected_order = jax.random.permutation(next(self._rng), self.n_agents)
+    self._combined_states = ma_utils.select_idx(
+        self._combined_states, selected_order, axis=1)
 
   def get_variables(self, names: Sequence[str]) -> list[networks_lib.Params]:
     # Return first replica of parameters.
@@ -225,6 +227,7 @@ class MALearnerPopArt(MALearner):
       n_agents: int,
       random_key: networks_lib.PRNGKey,
       loss_fn: Callable,
+      parameter_shuffle_period: int = 0,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
       devices: Optional[Sequence[jax.xla.Device]] = None,
@@ -249,6 +252,7 @@ class MALearnerPopArt(MALearner):
     self.n_agents = n_agents
     self.n_devices = len(self._local_devices)
     self._rng = hk.PRNGSequence(random_key)
+    self._parameter_shuffle_period = max(0, parameter_shuffle_period)
 
     def make_initial_state(key: jnp.ndarray) -> types.PopArtTrainingState:
       """Initialises the training state (parameters and optimiser state)."""

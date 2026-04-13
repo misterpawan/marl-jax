@@ -69,6 +69,7 @@ class IMPALABuilder(MABuilder):
         entropy_cost=self._config.entropy_cost,
         baseline_cost=self._config.baseline_cost,
         max_abs_reward=self._config.max_abs_reward,
+        parameter_shuffle_period=self._config.parameter_shuffle_period,
         counter=counter,
         logger=logger_fn(label="learner"),
     )
@@ -142,6 +143,7 @@ class PopArtIMPALABuilder(MABuilder):
         entropy_cost=self._config.entropy_cost,
         baseline_cost=self._config.baseline_cost,
         max_abs_reward=self._config.max_abs_reward,
+        parameter_shuffle_period=self._config.parameter_shuffle_period,
         counter=counter,
         logger=logger_fn(label="learner"),
     )
